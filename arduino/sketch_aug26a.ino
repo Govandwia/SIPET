@@ -1,5 +1,5 @@
-
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <DHT.h>
 #include <math.h>
@@ -9,21 +9,25 @@
 
 DHT dht(DHTPIN, DHTTYPE);
 
-// WIFI
+// ==========================================
+// PENGATURAN WI-FI
+// ==========================================
+// Ganti dengan Nama Wi-Fi & Password yang digunakan (bisa Hotspot HP)
 const char* ssid = "SIPETT";
 const char* password = "123456787";
 
-// SERVER XAMPP
-const char* serverURL =
-  "http://192.168.228.51/incubator/api.php";
+// ==========================================
+// URL SERVER CLOUD VERCEL
+// ==========================================
+const char* serverURL = "https://sipet-five.vercel.app/api/sensor";
 
 WiFiServer server(80);
 
-// PENGIRIMAN DATABASE SETIAP 5 MENIT
+// PENGIRIMAN DATA KE DATABASE SETIAP 5 MENIT (300.000 ms)
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 300000UL;
 
-// KOREKSI SUHU DHT22
+// KOREKSI SUHU DHT22 (Offset Kalibrasi)
 const float koreksiSuhu = -1.6;
 
 // MEMBACA SUHU DENGAN KOREKSI
@@ -37,7 +41,7 @@ float bacaSuhu() {
   return suhu + koreksiSuhu;
 }
 
-// MENGIRIM DATA KE DATABASE
+// MENGIRIM DATA KE DATABASE CLOUD (VERCEL + FIREBASE)
 void sendDataToServer() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Wi-Fi tidak terhubung.");
@@ -48,35 +52,43 @@ void sendDataToServer() {
   float humidity = dht.readHumidity();
 
   if (isnan(temperature) || isnan(humidity)) {
-    Serial.println("Gagal membaca DHT22.");
+    Serial.println("Gagal membaca sensor DHT22.");
     return;
   }
 
+  // Menggunakan WiFiClientSecure untuk koneksi aman HTTPS ke Vercel
+  WiFiClientSecure client;
+  client.setInsecure(); // Mengabaikan validasi root CA agar ESP32 lancar terkoneksi HTTPS
+
   HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   String url = String(serverURL) +
                "?temperature=" + String(temperature, 2) +
                "&humidity=" + String(humidity, 2);
 
   Serial.println();
-  Serial.println("Mengirim data ke database...");
+  Serial.println("Mengirim data ke Vercel + Firebase...");
   Serial.println(url);
 
-  http.begin(url);
-  int responseCode = http.GET();
+  if (http.begin(client, url)) {
+    int responseCode = http.GET();
 
-  if (responseCode > 0) {
-    Serial.print("HTTP Response Code: ");
-    Serial.println(responseCode);
+    if (responseCode > 0) {
+      Serial.print("HTTP Response Code: ");
+      Serial.println(responseCode);
 
-    Serial.print("Respons server: ");
-    Serial.println(http.getString());
+      Serial.print("Respons server: ");
+      Serial.println(http.getString());
+    } else {
+      Serial.print("Gagal mengirim data: ");
+      Serial.println(HTTPClient::errorToString(responseCode));
+    }
+
+    http.end();
   } else {
-    Serial.print("Gagal mengirim data: ");
-    Serial.println(HTTPClient::errorToString(responseCode));
+    Serial.println("Gagal menginisialisasi koneksi HTTPS ke Vercel.");
   }
-
-  http.end();
 }
 
 // SETUP
@@ -87,7 +99,10 @@ void setup() {
   dht.begin();
 
   Serial.println();
-  Serial.println("SIPET - INCUBATOR MONITORING");
+  Serial.println("==========================================");
+  Serial.println("SIPET - SMART INCUBATOR MONITORING (ESP32)");
+  Serial.println("Server Target: https://sipet-five.vercel.app");
+  Serial.println("==========================================");
   Serial.println("Menghubungkan ke Wi-Fi...");
 
   WiFi.begin(ssid, password);
@@ -100,13 +115,13 @@ void setup() {
   Serial.println();
   Serial.println("Wi-Fi berhasil terhubung!");
 
-  Serial.print("IP ESP32: ");
+  Serial.print("IP ESP32 Lokal: ");
   Serial.println(WiFi.localIP());
 
   server.begin();
-  Serial.println("Web server aktif!");
-  Serial.println("Pembacaan live tersedia di /data");
-  Serial.println("Database diperbarui setiap 5 menit.");
+  Serial.println("Web server ESP32 lokal aktif.");
+  Serial.println("Mengirim data pertama kali ke cloud...");
+  sendDataToServer();
 }
 
 // LOOP
@@ -117,7 +132,7 @@ void loop() {
     sendDataToServer();
   }
 
-  // MENANGANI PERMINTAAN WEB
+  // MENANGANI PERMINTAAN WEB SERVER LOKAL ESP32
   WiFiClient client = server.available();
 
   if (!client) {
@@ -129,7 +144,7 @@ void loop() {
   String request = client.readStringUntil('\r');
   client.readStringUntil('\n');
 
-  // ENDPOINT DATA SENSOR UNTUK DASHBOARD XAMPP
+  // ENDPOINT JSON DATA SENSOR UNTUK KONEKSI LOKAL
   if (request.indexOf("GET /data") >= 0) {
     float temperature = bacaSuhu();
     float humidity = dht.readHumidity();
@@ -155,7 +170,7 @@ void loop() {
     return;
   }
 
-  // DASHBOARD LANGSUNG ESP32
+  // DASHBOARD LOKAL SEDERHANA ESP32
   client.println("HTTP/1.1 200 OK");
   client.println("Content-Type: text/html; charset=UTF-8");
   client.println("Connection: close");
