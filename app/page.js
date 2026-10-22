@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { db, isFirebaseConfigured } from "@/lib/firebase";
 import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
@@ -39,6 +39,7 @@ export default function Dashboard() {
   const [dbStatus, setDbStatus] = useState(() => (isFirebaseConfigured ? "CONNECTED" : "DISCONNECTED"));
   const [deviceStatus, setDeviceStatus] = useState("CHECKING"); // "ONLINE" | "OFFLINE"
   const [lastSeenMinutes, setLastSeenMinutes] = useState(null);
+  const [timeRange, setTimeRange] = useState("5m"); // "1m" | "5m" | "1h"
 
   // Evaluasi apakah alat IoT (ESP32) aktif / tersambung berdasarkan waktu data terakhir
   useEffect(() => {
@@ -84,7 +85,7 @@ export default function Dashboard() {
         const q = query(
           collection(db, "sensor_data"),
           orderBy("timestamp", "desc"),
-          limit(50)
+          limit(1000)
         );
 
         unsubscribe = onSnapshot(
@@ -164,9 +165,66 @@ export default function Dashboard() {
     };
   }, []);
 
-  const chartRows = sensorRows.slice(-30);
+  // Filter baris data berdasarkan rentang waktu yang dipilih (1 Menit, 5 Menit, atau 1 Jam)
+  const filteredRows = useMemo(() => {
+    if (!sensorRows || sensorRows.length === 0) return [];
+
+    const newest = sensorRows[sensorRows.length - 1];
+    if (!newest?.timestamp || !newest.timestamp.includes(" ")) {
+      if (timeRange === "1m") return sensorRows.slice(-60);
+      if (timeRange === "5m") return sensorRows.slice(-300);
+      return sensorRows;
+    }
+
+    try {
+      const [y, m, d] = newest.timestamp.split(" ")[0].split("-").map(Number);
+      const [hh, mm, ss] = newest.timestamp.split(" ")[1].split(":").map(Number);
+      const latestTimeMs = new Date(y, m - 1, d, hh, mm, ss).getTime();
+
+      let rangeMs = 5 * 60 * 1000;
+      if (timeRange === "1m") rangeMs = 1 * 60 * 1000;
+      if (timeRange === "1h") rangeMs = 60 * 60 * 1000;
+
+      const minTimeMs = latestTimeMs - rangeMs;
+
+      const matched = sensorRows.filter((r) => {
+        if (!r.timestamp || !r.timestamp.includes(" ")) return false;
+        const [ry, rm, rd] = r.timestamp.split(" ")[0].split("-").map(Number);
+        const [rhh, rmm, rss] = r.timestamp.split(" ")[1].split(":").map(Number);
+        const tMs = new Date(ry, rm - 1, rd, rhh, rmm, rss).getTime();
+        return tMs >= minTimeMs;
+      });
+
+      if (timeRange === "1m" && matched.length < 5) return sensorRows.slice(-60);
+      if (timeRange === "5m" && matched.length < 5) return sensorRows.slice(-300);
+      if (timeRange === "1h" && matched.length < 5) return sensorRows;
+
+      return matched;
+    } catch (e) {
+      if (timeRange === "1m") return sensorRows.slice(-60);
+      if (timeRange === "5m") return sensorRows.slice(-300);
+      return sensorRows;
+    }
+  }, [sensorRows, timeRange]);
+
+  // Downsample data jika terlalu padat (maks 120 titik) agar render grafik super halus
+  const chartRows = useMemo(() => {
+    if (filteredRows.length <= 120) return filteredRows;
+    const step = Math.ceil(filteredRows.length / 120);
+    const sampled = [];
+    for (let i = 0; i < filteredRows.length; i += step) {
+      sampled.push(filteredRows[i]);
+    }
+    if (sampled[sampled.length - 1] !== filteredRows[filteredRows.length - 1]) {
+      sampled.push(filteredRows[filteredRows.length - 1]);
+    }
+    return sampled;
+  }, [filteredRows]);
+
+  const timeRangeLabel =
+    timeRange === "1m" ? "1 Menit Terakhir" : timeRange === "5m" ? "5 Menit Terakhir" : "1 Jam Terakhir";
+
   const chartLabels = chartRows.map((r) => {
-    // Tampilkan hanya jam:menit pada sumbu X agar tidak terlalu padat
     const parts = r.timestamp.split(" ");
     return parts[1] || r.timestamp;
   });
@@ -408,12 +466,93 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* GRAPH DATA SENSOR */}
+      {/* GRAPH DATA SENSOR (LIVE RECORDING) */}
       <div className="graph-card">
-        <div className="graph-header">
-          <div className="graph-title">Grafik Suhu dan Kelembapan Real-Time</div>
-          <div className="graph-desc">
-            Visualisasi tren 30 data sensor terakhir dengan sumbu ganda (dual Y-axis).
+        <div
+          className="graph-header"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "14px",
+          }}
+        >
+          <div>
+            <div className="graph-title">Grafik Suhu &amp; Kelembapan Real-Time (Live Recording)</div>
+            <div className="graph-desc">
+              Visualisasi rekaman sensor per detik — Rentang aktif: <strong>{timeRangeLabel}</strong> ({filteredRows.length} titik sampel).
+            </div>
+          </div>
+
+          {/* RENTANG WAKTU SELECTOR: 1 Menit, 5 Menit, 1 Jam */}
+          <div
+            style={{
+              display: "inline-flex",
+              background: "#f1f5f9",
+              padding: "4px",
+              borderRadius: "12px",
+              border: "1px solid #e2e8f0",
+              gap: "4px",
+            }}
+          >
+            <button
+              type="button"
+              id="btn-range-1m"
+              onClick={() => setTimeRange("1m")}
+              style={{
+                border: "none",
+                padding: "8px 14px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: timeRange === "1m" ? "700" : "500",
+                background: timeRange === "1m" ? "#2563eb" : "transparent",
+                color: timeRange === "1m" ? "white" : "#475569",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                boxShadow: timeRange === "1m" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
+              }}
+            >
+              ⏱ 1 Menit
+            </button>
+            <button
+              type="button"
+              id="btn-range-5m"
+              onClick={() => setTimeRange("5m")}
+              style={{
+                border: "none",
+                padding: "8px 14px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: timeRange === "5m" ? "700" : "500",
+                background: timeRange === "5m" ? "#2563eb" : "transparent",
+                color: timeRange === "5m" ? "white" : "#475569",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                boxShadow: timeRange === "5m" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
+              }}
+            >
+              ⏱ 5 Menit
+            </button>
+            <button
+              type="button"
+              id="btn-range-1h"
+              onClick={() => setTimeRange("1h")}
+              style={{
+                border: "none",
+                padding: "8px 14px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: timeRange === "1h" ? "700" : "500",
+                background: timeRange === "1h" ? "#2563eb" : "transparent",
+                color: timeRange === "1h" ? "white" : "#475569",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                boxShadow: timeRange === "1h" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
+              }}
+            >
+              ⏱ 1 Jam
+            </button>
           </div>
         </div>
         <div className="graph-box">

@@ -28,9 +28,9 @@ export async function GET(request) {
     const nextDay = String(nextDate.getDate()).padStart(2, "0");
     const akhirHari = `${nextYear}-${nextMonth}-${nextDay} 00:00:00`;
 
-    const filename = `data_sensor_hari_${hariKe}_${tanggalTerpilih}.csv`;
+    const filename = `rekap_rata2_5menit_hari_${hariKe}_${tanggalTerpilih}.csv`;
 
-    let rows = [];
+    let rawItems = [];
 
     if (isFirebaseConfigured && db) {
       const q = query(
@@ -44,35 +44,90 @@ export async function GET(request) {
       snapshot.forEach((doc) => {
         const d = doc.data();
         const isSeeder = Boolean(d.is_seeder) || (d.timestamp && d.timestamp >= "2026-10-14" && d.timestamp <= "2026-10-20 23:59:59");
-        const note = isSeeder ? "Data Seeder Contoh" : "Data Sensor Riil";
-        rows.push([
-          doc.id,
-          d.timestamp || "",
-          d.temperature || "",
-          d.humidity || "",
-          note,
-        ]);
+        rawItems.push({
+          id: doc.id,
+          timestamp: d.timestamp || "",
+          temperature: Number(d.temperature) || 0,
+          humidity: Number(d.humidity) || 0,
+          isSeeder,
+        });
       });
     }
 
     // Jika belum ada data dari Firestore, gunakan data simulasi realistis
-    if (rows.length === 0) {
+    if (rawItems.length === 0) {
       const mockFull = generateRealisticIncubationData();
       const mockHari = mockFull.filter((r) => r.timestamp.startsWith(tanggalTerpilih));
 
       mockHari.forEach((r) => {
-        rows.push([r.id, r.timestamp, r.temperature, r.humidity, "Data Seeder Contoh"]);
+        rawItems.push({
+          id: r.id,
+          timestamp: r.timestamp,
+          temperature: Number(r.temperature) || 0,
+          humidity: Number(r.humidity) || 0,
+          isSeeder: true,
+        });
       });
 
-      if (rows.length === 0) {
-        // Jika hari di luar rentang simulasi, buat baris informasi
-        rows.push(["info-1", `${tanggalTerpilih} 08:00:00`, "37.50", "62.00", "Data Seeder Contoh"]);
+      if (rawItems.length === 0) {
+        rawItems.push({
+          id: "info-1",
+          timestamp: `${tanggalTerpilih} 08:00:00`,
+          temperature: 37.5,
+          humidity: 62.0,
+          isSeeder: true,
+        });
       }
     }
 
+    // Agregasi Data menjadi Rata-rata per 5 Menit
+    const fiveMinBuckets = {};
+    rawItems.forEach((r) => {
+      const timePart = r.timestamp.split(" ")[1] || "00:00:00";
+      const parts = timePart.split(":");
+      const hh = parseInt(parts[0], 10) || 0;
+      const mm = parseInt(parts[1], 10) || 0;
+      const bIdx = Math.min(11, Math.floor(mm / 5));
+      const startM = bIdx * 5;
+      const endM = (bIdx + 1) * 5;
+      const startStr = `${String(hh).padStart(2, "0")}:${String(startM).padStart(2, "0")}`;
+      const endStr = endM === 60 ? `${String((hh + 1) % 24).padStart(2, "0")}:00` : `${String(hh).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+      const key = `${r.timestamp.split(" ")[0]} ${startStr}`;
+
+      if (!fiveMinBuckets[key]) {
+        fiveMinBuckets[key] = {
+          tanggal: r.timestamp.split(" ")[0],
+          rentang: `${startStr} - ${endStr}`,
+          tempSum: 0,
+          humSum: 0,
+          count: 0,
+          isSeeder: false,
+        };
+      }
+      fiveMinBuckets[key].tempSum += r.temperature;
+      fiveMinBuckets[key].humSum += r.humidity;
+      fiveMinBuckets[key].count++;
+      if (r.isSeeder) fiveMinBuckets[key].isSeeder = true;
+    });
+
+    const rows = Object.values(fiveMinBuckets).map((b, idx) => {
+      const avgT = (b.tempSum / b.count).toFixed(2);
+      const avgH = (b.humSum / b.count).toFixed(2);
+      const note = b.isSeeder ? "Data Seeder Contoh" : "Data Sensor Riil";
+      return [
+        idx + 1,
+        b.tanggal,
+        b.rentang,
+        avgT,
+        avgH,
+        b.count,
+        note,
+      ];
+    });
+
     // Susun isi CSV dengan UTF-8 BOM (\uFEFF) untuk Excel
     let csvContent = "\uFEFF";
-    csvContent += "ID,Timestamp,Temperature (C),Humidity (%RH),Keterangan\r\n";
+    csvContent += "No,Tanggal,Rentang 5 Menit,Rata-rata Suhu (C),Rata-rata Kelembapan (%RH),Jumlah Sampel,Keterangan\r\n";
 
     rows.forEach((row) => {
       const escaped = row.map((val) => `"${String(val).replace(/"/g, '""')}"`);

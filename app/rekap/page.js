@@ -157,15 +157,37 @@ export default function RekapPage() {
     return hasFlag || inSeederRange;
   }, [dataHariTerpilih, tanggalTerpilih]);
 
-  // Agregasi Per Jam (24 Jam)
+  // Agregasi Per Jam (24 Jam) dan Rata-rata Interval 5 Menit
   const { perJam, labelJam, suhuJam, kelembapanJam, jumlahPerJam, rataSuhu, rataKelembapan, totalSampel } =
     useMemo(() => {
-      const hours = Array.from({ length: 24 }, () => ({
-        suhu: 0,
-        kelembapan: 0,
-        jumlah: 0,
-        rows: [],
-      }));
+      const hours = Array.from({ length: 24 }, (_, h) => {
+        // Buat 12 slot 5-menit (00..55) untuk setiap jam
+        const buckets = Array.from({ length: 12 }, (_, bIdx) => {
+          const startM = bIdx * 5;
+          const endM = (bIdx + 1) * 5;
+          const startStr = `${String(h).padStart(2, "0")}:${String(startM).padStart(2, "0")}`;
+          const endStr = endM === 60 ? `${String((h + 1) % 24).padStart(2, "0")}:00` : `${String(h).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+          return {
+            bucketIndex: bIdx,
+            rentang: `${startStr} – ${endStr}`,
+            startStr,
+            suhuSum: 0,
+            kelembapanSum: 0,
+            jumlah: 0,
+            rows: [],
+          };
+        });
+
+        return {
+          jam: h,
+          suhu: 0,
+          kelembapan: 0,
+          jumlah: 0,
+          rows: [],
+          buckets,
+          averages5Min: [],
+        };
+      });
 
       let totalS = 0;
       let totalK = 0;
@@ -173,6 +195,8 @@ export default function RekapPage() {
       dataHariTerpilih.forEach((row) => {
         const timePart = row.timestamp.split(" ")[1] || "00:00:00";
         const h = parseInt(timePart.split(":")[0], 10);
+        const m = parseInt(timePart.split(":")[1], 10);
+
         if (!isNaN(h) && h >= 0 && h < 24) {
           hours[h].suhu += row.temperature;
           hours[h].kelembapan += row.humidity;
@@ -180,7 +204,30 @@ export default function RekapPage() {
           hours[h].rows.push(row);
           totalS += row.temperature;
           totalK += row.humidity;
+
+          if (!isNaN(m) && m >= 0 && m < 60) {
+            const bIdx = Math.min(11, Math.floor(m / 5));
+            hours[h].buckets[bIdx].suhuSum += row.temperature;
+            hours[h].buckets[bIdx].kelembapanSum += row.humidity;
+            hours[h].buckets[bIdx].jumlah++;
+            hours[h].buckets[bIdx].rows.push(row);
+          }
         }
+      });
+
+      // Hitung nilai rata-rata 5 menit untuk setiap jam
+      hours.forEach((hInfo) => {
+        hInfo.averages5Min = hInfo.buckets
+          .filter((b) => b.jumlah > 0)
+          .map((b, idx) => ({
+            no: idx + 1,
+            rentang: b.rentang,
+            waktuLengkap: `${tanggalTerpilih} ${b.startStr}:00`,
+            avgTemperature: Number((b.suhuSum / b.jumlah).toFixed(2)),
+            avgHumidity: Number((b.kelembapanSum / b.jumlah).toFixed(2)),
+            sampleCount: b.jumlah,
+            isSeeder: b.rows.some((r) => r.is_seeder),
+          }));
       });
 
       const totalSampel = dataHariTerpilih.length;
@@ -206,7 +253,7 @@ export default function RekapPage() {
         rataKelembapan,
         totalSampel,
       };
-    }, [dataHariTerpilih]);
+    }, [dataHariTerpilih, tanggalTerpilih]);
 
   // Agregasi Tren 21 Hari
   const { labelHari, suhuHari, kelembapanHari, jumlahHariData } = useMemo(() => {
@@ -874,10 +921,10 @@ export default function RekapPage() {
       >
         <div style={{ marginBottom: "16px" }}>
           <div style={{ fontSize: "18px", fontWeight: "700", color: "#0f172a" }}>
-            Data Mentah Sensor per Jam — Hari {hariKe}
+            Data Rekapitulasi Rata-rata per 5 Menit — Hari {hariKe}
           </div>
           <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-            Klik baris jam di bawah ini untuk melihat detail data suhu, kelembapan, dan waktu setiap sampel.
+            Data sampel live diakumulasi dan dihitung nilai rata-rata (average) setiap rentang 5 menit pada <strong>Hari {hariKe}</strong> ({tanggalTerpilihFormat}).
           </div>
         </div>
 
@@ -918,13 +965,13 @@ export default function RekapPage() {
                     color: info.jumlah > 0 ? "#0369a1" : "#64748b",
                   }}
                 >
-                  {info.jumlah} sampel
+                  {info.averages5Min.length} slot 5-menit ({info.jumlah} sampel)
                 </span>
               </div>
               <div style={{ fontSize: "13px", color: "#475569" }}>
                 {info.jumlah > 0 ? (
                   <span>
-                    Suhu: <strong>{(info.suhu / info.jumlah).toFixed(2)} °C</strong> | Kelembapan:{" "}
+                    Rata-rata: Suhu <strong>{(info.suhu / info.jumlah).toFixed(2)} °C</strong> | Kelembapan:{" "}
                     <strong>{(info.kelembapan / info.jumlah).toFixed(2)} %RH</strong>
                   </span>
                 ) : (
@@ -934,27 +981,49 @@ export default function RekapPage() {
             </summary>
 
             <div style={{ padding: "16px 20px" }}>
-              {info.rows.length > 0 ? (
+              {info.averages5Min && info.averages5Min.length > 0 ? (
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                         <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>No</th>
-                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Waktu Pencatatan</th>
-                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Suhu (°C)</th>
-                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Kelembapan (%RH)</th>
+                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Rentang Waktu (Rata-rata 5 Menit)</th>
+                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Rata-rata Suhu (°C)</th>
+                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Rata-rata Kelembapan (%RH)</th>
+                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Sampel Terhitung</th>
+                        <th style={{ padding: "10px", fontSize: "12px", color: "#475569", textAlign: "center" }}>Status Suhu</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {info.rows.map((row, idx) => (
-                        <tr key={row.id || idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      {info.averages5Min.map((b, idx) => (
+                        <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
                           <td style={{ padding: "10px", textAlign: "center", fontSize: "13px" }}>{idx + 1}</td>
-                          <td style={{ padding: "10px", textAlign: "center", fontSize: "13px" }}>{row.timestamp}</td>
-                          <td style={{ padding: "10px", textAlign: "center", fontSize: "13px", fontWeight: "600", color: "#2563eb" }}>
-                            {Number(row.temperature).toFixed(2)}
+                          <td style={{ padding: "10px", textAlign: "center", fontSize: "13px", fontWeight: "600", color: "#334155" }}>
+                            ⏱ {b.rentang}
                           </td>
-                          <td style={{ padding: "10px", textAlign: "center", fontSize: "13px", fontWeight: "600", color: "#0d9488" }}>
-                            {Number(row.humidity).toFixed(2)}
+                          <td style={{ padding: "10px", textAlign: "center", fontSize: "13px", fontWeight: "700", color: "#2563eb" }}>
+                            {b.avgTemperature.toFixed(2)} °C
+                          </td>
+                          <td style={{ padding: "10px", textAlign: "center", fontSize: "13px", fontWeight: "700", color: "#0d9488" }}>
+                            {b.avgHumidity.toFixed(2)} %RH
+                          </td>
+                          <td style={{ padding: "10px", textAlign: "center", fontSize: "12px", color: "#64748b" }}>
+                            {b.sampleCount} data
+                          </td>
+                          <td style={{ padding: "10px", textAlign: "center", fontSize: "12px" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "3px 8px",
+                                borderRadius: "12px",
+                                fontSize: "11px",
+                                fontWeight: "600",
+                                background: b.avgTemperature >= 37.4 && b.avgTemperature <= 38.0 ? "#dcfce7" : "#fef9c3",
+                                color: b.avgTemperature >= 37.4 && b.avgTemperature <= 38.0 ? "#15803d" : "#a16207",
+                              }}
+                            >
+                              {b.avgTemperature >= 37.4 && b.avgTemperature <= 38.0 ? "✓ Normal" : "⚠ Pantau"}
+                            </span>
                           </td>
                         </tr>
                       ))}

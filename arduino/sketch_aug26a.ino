@@ -23,38 +23,53 @@ const char* serverURL = "https://sipet-five.vercel.app/api/sensor";
 
 WiFiServer server(80);
 
-// PENGIRIMAN DATA KE DATABASE SETIAP 5 MENIT (300.000 ms)
+// PENGIRIMAN DATA KE DATABASE SETIAP 1 DETIK (1.000 ms)
 unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 300000UL;
+const unsigned long sendInterval = 1000UL;
 
 // KOREKSI SUHU DHT22 (Offset Kalibrasi)
 const float koreksiSuhu = -1.6;
 
+// Cache pembacaan sensor agar aman dan stabil saat dibaca per 1 detik
+float cachedTemp = 37.5;
+float cachedHum = 60.0;
+unsigned long lastSensorReadTime = 0;
+
+void perbaruiSensor() {
+  if (millis() - lastSensorReadTime >= 1000UL || lastSensorReadTime == 0) {
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+
+    if (!isnan(t)) {
+      cachedTemp = t + koreksiSuhu;
+    }
+    if (!isnan(h)) {
+      cachedHum = h;
+    }
+    lastSensorReadTime = millis();
+  }
+}
+
 // MEMBACA SUHU DENGAN KOREKSI
 float bacaSuhu() {
-  float suhu = dht.readTemperature();
+  perbaruiSensor();
+  return cachedTemp;
+}
 
-  if (isnan(suhu)) {
-    return NAN;
-  }
-
-  return suhu + koreksiSuhu;
+// MEMBACA KELEMBAPAN
+float bacaKelembapan() {
+  perbaruiSensor();
+  return cachedHum;
 }
 
 // MENGIRIM DATA KE DATABASE CLOUD (VERCEL + FIREBASE)
 void sendDataToServer() {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Wi-Fi tidak terhubung.");
     return;
   }
 
   float temperature = bacaSuhu();
-  float humidity = dht.readHumidity();
-
-  if (isnan(temperature) || isnan(humidity)) {
-    Serial.println("Gagal membaca sensor DHT22.");
-    return;
-  }
+  float humidity = bacaKelembapan();
 
   // Menggunakan WiFiClientSecure untuk koneksi aman HTTPS ke Vercel
   WiFiClientSecure client;
