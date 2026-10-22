@@ -1,5 +1,6 @@
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <DHT.h>
 #include <math.h>
@@ -9,13 +10,12 @@
 
 DHT dht(DHTPIN, DHTTYPE);
 
-// WIFI
+// WIFI (Jika menggunakan Hotspot biasa)
 const char* ssid = "SIPETT";
 const char* password = "123456787";
 
-// SERVER XAMPP
-const char* serverURL =
-  "http://192.168.228.51/incubator/api.php";
+// SERVER VERCEL + FIREBASE CLOUD
+const char* serverURL = "https://sipet-five.vercel.app/api/sensor";
 
 WiFiServer server(80);
 
@@ -37,7 +37,7 @@ float bacaSuhu() {
   return suhu + koreksiSuhu;
 }
 
-// MENGIRIM DATA KE DATABASE
+// MENGIRIM DATA KE DATABASE CLOUD (VERCEL + FIREBASE)
 void sendDataToServer() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Wi-Fi tidak terhubung.");
@@ -52,31 +52,39 @@ void sendDataToServer() {
     return;
   }
 
+  // Menggunakan WiFiClientSecure untuk koneksi aman HTTPS ke Vercel
+  WiFiClientSecure client;
+  client.setInsecure(); // Mengabaikan validasi root CA agar ESP32 lancar terkoneksi HTTPS
+
   HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   String url = String(serverURL) +
                "?temperature=" + String(temperature, 2) +
                "&humidity=" + String(humidity, 2);
 
   Serial.println();
-  Serial.println("Mengirim data ke database...");
+  Serial.println("Mengirim data ke database Vercel + Firebase...");
   Serial.println(url);
 
-  http.begin(url);
-  int responseCode = http.GET();
+  if (http.begin(client, url)) {
+    int responseCode = http.GET();
 
-  if (responseCode > 0) {
-    Serial.print("HTTP Response Code: ");
-    Serial.println(responseCode);
+    if (responseCode > 0) {
+      Serial.print("HTTP Response Code: ");
+      Serial.println(responseCode);
 
-    Serial.print("Respons server: ");
-    Serial.println(http.getString());
+      Serial.print("Respons server: ");
+      Serial.println(http.getString());
+    } else {
+      Serial.print("Gagal mengirim data: ");
+      Serial.println(HTTPClient::errorToString(responseCode));
+    }
+
+    http.end();
   } else {
-    Serial.print("Gagal mengirim data: ");
-    Serial.println(HTTPClient::errorToString(responseCode));
+    Serial.println("Gagal menginisialisasi koneksi HTTPS ke Vercel.");
   }
-
-  http.end();
 }
 
 // SETUP
@@ -107,6 +115,8 @@ void setup() {
   Serial.println("Web server aktif!");
   Serial.println("Pembacaan live tersedia di /data");
   Serial.println("Database diperbarui setiap 5 menit.");
+  Serial.println("Mengirim data pertama kali ke cloud...");
+  sendDataToServer();
 }
 
 // LOOP
