@@ -32,9 +32,14 @@ ChartJS.register(
 );
 
 export default function RekapPage() {
-  const jumlahHari = 21;
+  // Tanggal default hari ini (WIB)
+  const todayStr = useMemo(() => {
+    return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+  }, []);
 
-  const [hariKe, setHariKe] = useState(1);
+  // Tanggal yang sedang dipilih (otomatis dimulai dari hari ini atau tanggal terbaru yang memiliki data)
+  const [tanggalTerpilih, setTanggalTerpilih] = useState(todayStr);
+
   // Default state langsung terisi data simulasi realistis agar tidak pernah kosong / "-"
   const [allData, setAllData] = useState(() => generateRealisticIncubationData());
   const [loading, setLoading] = useState(false);
@@ -105,44 +110,68 @@ export default function RekapPage() {
     fetchFromFirebase();
   }, []);
 
-  // Tanggal Mulai Siklus (Default 14/10/2026 atau otomatis disesuaikan dengan data pertama di Firebase)
-  const [tanggalMulai, setTanggalMulai] = useState("2026-10-21");
+  // Ekstrak semua tanggal unik yang ada di database secara otomatis
+  const daftarTanggalTersedia = useMemo(() => {
+    const datesMap = new Map();
 
+    allData.forEach((row) => {
+      if (row.timestamp && row.timestamp.includes(" ")) {
+        const d = row.timestamp.split(" ")[0];
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+          if (!datesMap.has(d)) {
+            datesMap.set(d, {
+              count: 0,
+              isSeeder: Boolean(row.is_seeder) || (d >= "2026-10-14" && d <= "2026-10-20"),
+            });
+          }
+          datesMap.get(d).count++;
+        }
+      }
+    });
+
+    // Pastikan tanggal hari ini selalu ada dalam daftar pilihan
+    if (!datesMap.has(todayStr)) {
+      datesMap.set(todayStr, { count: 0, isSeeder: false });
+    }
+
+    // Urutkan tanggal dari yang paling baru ke yang paling lama
+    return Array.from(datesMap.entries())
+      .map(([dateStr, meta]) => ({
+        date: dateStr,
+        count: meta.count,
+        isSeeder: meta.isSeeder,
+        isToday: dateStr === todayStr,
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [allData, todayStr]);
+
+  // Otomatis pilih tanggal terbaru yang memiliki data jika hari ini masih kosong
   useEffect(() => {
-    if (allData.length > 0 && isFirebaseConfigured) {
-      const firstRow = allData[0];
-      if (firstRow?.timestamp) {
-        const datePart = firstRow.timestamp.split(" ")[0];
-        if (datePart && /^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-          setTanggalMulai(datePart);
+    if (daftarTanggalTersedia.length > 0) {
+      const todayMeta = daftarTanggalTersedia.find((d) => d.date === todayStr);
+      if (!todayMeta || todayMeta.count === 0) {
+        const latestWithData = daftarTanggalTersedia.find((d) => d.count > 0);
+        if (latestWithData) {
+          setTanggalTerpilih(latestWithData.date);
         }
       }
     }
-  }, [allData]);
+  }, [daftarTanggalTersedia, todayStr]);
 
-  const getTanggalHari = (dayIndex) => {
-    const parts = tanggalMulai.split("-");
-    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10) + (dayIndex - 1));
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  // Tanggal yang dipilih (format: YYYY-MM-DD)
-  const tanggalTerpilih = useMemo(() => {
-    return getTanggalHari(hariKe);
-  }, [tanggalMulai, hariKe]);
-
-  // Format tanggal display (contoh: 14 Oktober 2026)
+  // Format tanggal display (contoh: Kamis, 22 Oktober 2026)
   const tanggalTerpilihFormat = useMemo(() => {
-    const parts = tanggalTerpilih.split("-");
-    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    return d.toLocaleDateString("id-ID", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    try {
+      const parts = tanggalTerpilih.split("-");
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      return d.toLocaleDateString("id-ID", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+    } catch {
+      return tanggalTerpilih;
+    }
   }, [tanggalTerpilih]);
 
   // Data mentah untuk hari yang dipilih
@@ -255,16 +284,22 @@ export default function RekapPage() {
       };
     }, [dataHariTerpilih, tanggalTerpilih]);
 
-  // Agregasi Tren 21 Hari
+  // Agregasi Tren Riwayat Pengamatan Harian (Berdasarkan Tanggal Riil di Database)
   const { labelHari, suhuHari, kelembapanHari, jumlahHariData } = useMemo(() => {
     const lHari = [];
     const sHari = [];
     const kHari = [];
     const jHari = [];
 
-    for (let i = 1; i <= jumlahHari; i++) {
-      const dateStr = getTanggalHari(i);
-      lHari.push(`Hari ${i}`);
+    // Ambil tanggal berurutan secara kronologis (dari yang terlama ke terbaru)
+    const sortedDatesAsc = [...daftarTanggalTersedia].reverse();
+
+    sortedDatesAsc.forEach((item) => {
+      const dateStr = item.date;
+      const parts = dateStr.split("-").map(Number);
+      const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+      const formattedShort = dObj.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+      lHari.push(formattedShort);
 
       const rowsOfDay = allData.filter((r) => r.timestamp && r.timestamp.startsWith(dateStr));
       const count = rowsOfDay.length;
@@ -279,10 +314,10 @@ export default function RekapPage() {
         sHari.push(null);
         kHari.push(null);
       }
-    }
+    });
 
     return { labelHari: lHari, suhuHari: sHari, kelembapanHari: kHari, jumlahHariData: jHari };
-  }, [allData, tanggalMulai]);
+  }, [allData, daftarTanggalTersedia]);
 
   // Grafik Suhu & Kelembapan per Jam
   const grafikJamData = {
@@ -317,8 +352,8 @@ export default function RekapPage() {
     ],
   };
 
-  // Grafik Tren 21 Hari
-  const grafik21HariData = {
+  // Grafik Tren Riwayat Harian
+  const grafikTrenHarianData = {
     labels: labelHari,
     datasets: [
       {
@@ -471,7 +506,7 @@ export default function RekapPage() {
           }}
         >
           <div style={{ fontSize: "20px", fontWeight: "700", color: "#0f172a" }}>
-            Pilih Hari Pengamatan
+            Pilih Tanggal Pengamatan
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
             <div
@@ -537,14 +572,14 @@ export default function RekapPage() {
             gap: "16px",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <label htmlFor="hariSelect" style={{ fontSize: "14px", fontWeight: "600", color: "#334155" }}>
-              Hari:
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <label htmlFor="tanggalSelect" style={{ fontSize: "14px", fontWeight: "600", color: "#334155" }}>
+              Pilih Tanggal:
             </label>
             <select
-              id="hariSelect"
-              value={hariKe}
-              onChange={(e) => setHariKe(parseInt(e.target.value, 10))}
+              id="tanggalSelect"
+              value={tanggalTerpilih}
+              onChange={(e) => setTanggalTerpilih(e.target.value)}
               style={{
                 border: "1.5px solid #cbd5e1",
                 borderRadius: "10px",
@@ -554,22 +589,52 @@ export default function RekapPage() {
                 color: "#0f172a",
                 backgroundColor: "#f8fafc",
                 cursor: "pointer",
-                minWidth: "250px",
+                minWidth: "260px",
                 outline: "none",
               }}
             >
-              {Array.from({ length: jumlahHari }, (_, i) => {
-                const dayNum = i + 1;
-                const dateParts = getTanggalHari(dayNum).split("-");
-                const tgl = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
-                const isSeededOption = dayNum <= 7;
+              {daftarTanggalTersedia.map((item) => {
+                const parts = item.date.split("-").map(Number);
+                const dObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                const namaHari = dObj.toLocaleDateString("id-ID", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                });
+                const tag = item.isToday
+                  ? " (Hari Ini)"
+                  : item.isSeeder
+                  ? " (Contoh Seeder)"
+                  : ` (${item.count} data)`;
                 return (
-                  <option key={dayNum} value={dayNum}>
-                    Hari {dayNum} — {tgl} {isSeededOption ? "(Contoh Seeder)" : ""}
+                  <option key={item.date} value={item.date}>
+                    {namaHari} {tag}
                   </option>
                 );
               })}
             </select>
+
+            {/* Input Kalender Bebas */}
+            <input
+              type="date"
+              id="datePicker"
+              value={tanggalTerpilih}
+              onChange={(e) => {
+                if (e.target.value) setTanggalTerpilih(e.target.value);
+              }}
+              style={{
+                border: "1.5px solid #cbd5e1",
+                borderRadius: "10px",
+                padding: "9px 12px",
+                fontSize: "14px",
+                fontWeight: "600",
+                color: "#0f172a",
+                backgroundColor: "#f8fafc",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            />
           </div>
 
           <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
@@ -594,7 +659,7 @@ export default function RekapPage() {
             </Link>
 
             <a
-              href={`/api/download?hari=${hariKe}&tanggal_mulai=${tanggalMulai}`}
+              href={`/api/download?tanggal=${tanggalTerpilih}`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -641,7 +706,7 @@ export default function RekapPage() {
               Catatan Pengamatan: Data Seeder Contoh (14 – 20 Oktober 2026)
             </div>
             <div style={{ color: "#1e40af" }}>
-              Data pengamatan pada <strong>Hari {hariKe} ({tanggalTerpilihFormat})</strong> ini merupakan <strong>Data Seeder</strong> yang
+              Data pengamatan pada <strong>{tanggalTerpilihFormat}</strong> ini merupakan <strong>Data Seeder</strong> yang
               dibuat khusus sebagai data contoh/simulasi penetasan telur untuk keperluan referensi dan pengujian (rata-rata suhu ~37.58°C dan kelembapan ~61.20% RH).
               Data ini tersimpan di database Firebase Firestore dan dapat digunakan untuk pengujian grafik, analisis per jam, serta ekspor CSV.
             </div>
@@ -831,7 +896,7 @@ export default function RekapPage() {
             Grafik Suhu dan Kelembapan per Jam
           </div>
           <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-            Rata-rata pembacaan sensor setiap jam pada <strong>Hari {hariKe}</strong> ({tanggalTerpilihFormat}).
+            Rata-rata pembacaan sensor setiap jam pada <strong>{tanggalTerpilihFormat}</strong>.
           </div>
         </div>
         <div style={{ position: "relative", width: "100%", height: "360px" }}>
@@ -884,7 +949,7 @@ export default function RekapPage() {
         </div>
       </section>
 
-      {/* GRAFIK TREN 21 HARI */}
+      {/* GRAFIK TREN RIWAYAT HARIAN */}
       <section
         style={{
           background: "white",
@@ -897,14 +962,14 @@ export default function RekapPage() {
       >
         <div style={{ marginBottom: "16px" }}>
           <div style={{ fontSize: "18px", fontWeight: "700", color: "#0f172a" }}>
-            Grafik Tren Suhu &amp; Kelembapan Selama 21 Hari
+            Grafik Tren Riwayat Suhu &amp; Kelembapan Harian
           </div>
           <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-            Perbandingan rata-rata harian dari Hari ke-1 hingga Hari ke-21 masa inkubasi.
+            Perbandingan nilai rata-rata harian yang tercatat di database secara kronologis.
           </div>
         </div>
         <div style={{ position: "relative", width: "100%", height: "360px" }}>
-          <Line data={grafik21HariData} options={chartOptionsDual} />
+          <Line data={grafikTrenHarianData} options={chartOptionsDual} />
         </div>
       </section>
 
@@ -921,10 +986,10 @@ export default function RekapPage() {
       >
         <div style={{ marginBottom: "16px" }}>
           <div style={{ fontSize: "18px", fontWeight: "700", color: "#0f172a" }}>
-            Data Rekapitulasi Rata-rata per 5 Menit — Hari {hariKe}
+            Data Rekapitulasi Rata-rata per 5 Menit
           </div>
           <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-            Data sampel live diakumulasi dan dihitung nilai rata-rata (average) setiap rentang 5 menit pada <strong>Hari {hariKe}</strong> ({tanggalTerpilihFormat}).
+            Data sampel live diakumulasi dan dihitung nilai rata-rata (average) setiap rentang 5 menit pada <strong>{tanggalTerpilihFormat}</strong>.
           </div>
         </div>
 

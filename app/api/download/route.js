@@ -6,29 +6,37 @@ import { generateRealisticIncubationData } from "@/lib/mockData";
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const tanggalMulaiParam = searchParams.get("tanggal_mulai") || "2026-10-21";
-    const jumlahHari = 21;
+    const todayDefault = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+    let tanggalTerpilih = searchParams.get("tanggal");
 
-    let hariKe = parseInt(searchParams.get("hari") || "1", 10);
-    hariKe = Math.max(1, Math.min(jumlahHari, isNaN(hariKe) ? 1 : hariKe));
+    // Dukungan backward compatibility jika ada pemanggilan lama dengan param ?hari=
+    if (!tanggalTerpilih) {
+      if (searchParams.has("hari")) {
+        const tanggalMulaiParam = searchParams.get("tanggal_mulai") || "2026-10-14";
+        const hariKe = parseInt(searchParams.get("hari") || "1", 10);
+        const parts = tanggalMulaiParam.split("-");
+        const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10) + (hariKe - 1));
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        tanggalTerpilih = `${y}-${m}-${day}`;
+      } else {
+        tanggalTerpilih = todayDefault;
+      }
+    }
 
-    // Hitung tanggal yang dipilih berdasarkan tanggal mulai
-    const parts = tanggalMulaiParam.split("-");
-    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10) + (hariKe - 1));
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const tanggalTerpilih = `${year}-${month}-${day}`;
-
-    const awalHari = `${tanggalTerpilih} 00:00:00`;
+    const parts = tanggalTerpilih.split("-").map(Number);
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
     const nextDate = new Date(d);
     nextDate.setDate(nextDate.getDate() + 1);
     const nextYear = nextDate.getFullYear();
     const nextMonth = String(nextDate.getMonth() + 1).padStart(2, "0");
     const nextDay = String(nextDate.getDate()).padStart(2, "0");
+
+    const awalHari = `${tanggalTerpilih} 00:00:00`;
     const akhirHari = `${nextYear}-${nextMonth}-${nextDay} 00:00:00`;
 
-    const filename = `rekap_rata2_5menit_hari_${hariKe}_${tanggalTerpilih}.csv`;
+    const filename = `rekap_rata2_5menit_${tanggalTerpilih}.csv`;
 
     let rawItems = [];
 
