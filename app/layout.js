@@ -68,8 +68,13 @@ export default function RootLayout({ children }) {
 
         {children}
 
-        <footer className="footer">
-          ESP32 + DHT22 + Next.js + Firebase Monitoring System
+        <footer className="footer" style={{ textAlign: "center", lineHeight: "1.6" }}>
+          <div>
+            <strong>SIPET - Incubator Monitoring</strong> • Tugas Akhir (TA) Septina Tri Rahayu ({'23/519797/SV/23180'})
+          </div>
+          <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "4px" }}>
+            Teknologi Veteriner • Departemen Teknologi Hayati dan Veteriner • Sekolah Vokasi Universitas Gadjah Mada
+          </div>
         </footer>
       </body>
     </html>

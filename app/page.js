@@ -363,6 +363,103 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* INFORMASI TUGAS AKHIR & PENELITI */}
+      <div
+        className="panel"
+        style={{
+          padding: "20px 24px",
+          marginBottom: "24px",
+          background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
+          border: "1px solid #e2e8f0",
+          borderLeft: "5px solid #2563eb",
+          borderRadius: "14px",
+          boxShadow: "0 4px 15px -2px rgba(15, 23, 42, 0.05)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "10px",
+            marginBottom: "16px",
+            paddingBottom: "12px",
+            borderBottom: "1px solid #f1f5f9",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "22px" }}>🎓</span>
+            <div>
+              <h2 style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a", margin: 0 }}>
+                Informasi Tugas Akhir (TA)
+              </h2>
+              <span style={{ fontSize: "12.5px", color: "#64748b" }}>
+                Departemen Teknologi Hayati dan Veteriner (DTHV) • Sekolah Vokasi UGM
+              </span>
+            </div>
+          </div>
+          <span
+            style={{
+              fontSize: "11.5px",
+              fontWeight: "600",
+              color: "#2563eb",
+              background: "#eff6ff",
+              padding: "4px 12px",
+              borderRadius: "20px",
+              border: "1px solid #dbeafe",
+            }}
+          >
+            Teknologi Veteriner
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "16px",
+            fontSize: "13.5px",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ color: "#64748b", fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Nama Mahasiswa
+            </span>
+            <span style={{ fontWeight: "700", color: "#0f172a", fontSize: "14.5px" }}>
+              Septina Tri Rahayu
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ color: "#64748b", fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              NIM
+            </span>
+            <span style={{ fontWeight: "700", color: "#0f172a", fontSize: "14px", fontFamily: "monospace" }}>
+              23/519797/SV/23180
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ color: "#64748b", fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Dosen Pembimbing TA
+            </span>
+            <span style={{ fontWeight: "700", color: "#0f172a", fontSize: "14px" }}>
+              drh. M. Rosyid Ridlo, M.Sc., Ph.D.
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ color: "#64748b", fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Program Studi &amp; Departemen
+            </span>
+            <span style={{ fontWeight: "600", color: "#334155", fontSize: "13px", lineHeight: "1.4" }}>
+              Teknologi Veteriner, Departemen Teknologi Hayati dan Veteriner, Sekolah Vokasi Universitas Gadjah Mada
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* SENSOR LIVE CARDS */}
       <div className="metric-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         {/* SUHU */}
