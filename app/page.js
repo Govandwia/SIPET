@@ -39,7 +39,7 @@ export default function Dashboard() {
   const [dbStatus, setDbStatus] = useState(() => (isFirebaseConfigured ? "CONNECTED" : "DISCONNECTED"));
   const [deviceStatus, setDeviceStatus] = useState("CHECKING"); // "ONLINE" | "OFFLINE"
   const [lastSeenMinutes, setLastSeenMinutes] = useState(null);
-  const [timeRange, setTimeRange] = useState("5m"); // "1m" | "5m" | "1h"
+  const [timeRange, setTimeRange] = useState("8h"); // "30m" | "8h" | "1d"
 
   // Evaluasi apakah alat IoT (ESP32) aktif / tersambung berdasarkan waktu data terakhir
   useEffect(() => {
@@ -58,8 +58,8 @@ export default function Dashboard() {
           const recordTime = new Date(y, m - 1, d, hh, mm, ss).getTime();
           const diffMinutes = Math.floor((Date.now() - recordTime) / (1000 * 60));
           setLastSeenMinutes(diffMinutes);
-          // Bila data diterima dalam 15 menit terakhir, alat dianggap aktif ONLINE
-          if (diffMinutes >= 0 && diffMinutes <= 15) {
+          // Bila data diterima dalam 20 menit terakhir, alat dianggap aktif ONLINE (toleransi pengiriman 5 menit)
+          if (diffMinutes >= 0 && diffMinutes <= 20) {
             setDeviceStatus("ONLINE");
           } else {
             setDeviceStatus("OFFLINE");
@@ -165,15 +165,15 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Filter baris data berdasarkan rentang waktu yang dipilih (1 Menit, 5 Menit, atau 1 Jam)
+  // Filter baris data berdasarkan rentang waktu yang dipilih (30 Menit, 8 Jam, atau 1 Hari)
   const filteredRows = useMemo(() => {
     if (!sensorRows || sensorRows.length === 0) return [];
 
     const newest = sensorRows[sensorRows.length - 1];
     if (!newest?.timestamp || !newest.timestamp.includes(" ")) {
-      if (timeRange === "1m") return sensorRows.slice(-60);
-      if (timeRange === "5m") return sensorRows.slice(-300);
-      return sensorRows;
+      if (timeRange === "30m") return sensorRows.slice(-6);
+      if (timeRange === "8h") return sensorRows.slice(-96);
+      return sensorRows.slice(-288);
     }
 
     try {
@@ -181,9 +181,10 @@ export default function Dashboard() {
       const [hh, mm, ss] = newest.timestamp.split(" ")[1].split(":").map(Number);
       const latestTimeMs = new Date(y, m - 1, d, hh, mm, ss).getTime();
 
-      let rangeMs = 5 * 60 * 1000;
-      if (timeRange === "1m") rangeMs = 1 * 60 * 1000;
-      if (timeRange === "1h") rangeMs = 60 * 60 * 1000;
+      let rangeMs = 8 * 60 * 60 * 1000;
+      if (timeRange === "30m") rangeMs = 30 * 60 * 1000; // 30 Menit
+      if (timeRange === "8h") rangeMs = 8 * 60 * 60 * 1000; // 8 Jam
+      if (timeRange === "1d") rangeMs = 24 * 60 * 60 * 1000; // 1 Hari (24 Jam)
 
       const minTimeMs = latestTimeMs - rangeMs;
 
@@ -195,22 +196,24 @@ export default function Dashboard() {
         return tMs >= minTimeMs;
       });
 
-      if (timeRange === "1m" && matched.length < 5) return sensorRows.slice(-60);
-      if (timeRange === "5m" && matched.length < 5) return sensorRows.slice(-300);
-      if (timeRange === "1h" && matched.length < 5) return sensorRows;
+      // Kembalikan data yang berada dalam rentang waktu jika ada
+      if (matched.length > 0) return matched;
 
-      return matched;
+      // Fallback jika perhitungan waktu tidak menemukan data
+      if (timeRange === "30m") return sensorRows.slice(-6);
+      if (timeRange === "8h") return sensorRows.slice(-96);
+      return sensorRows.slice(-288);
     } catch (e) {
-      if (timeRange === "1m") return sensorRows.slice(-60);
-      if (timeRange === "5m") return sensorRows.slice(-300);
-      return sensorRows;
+      if (timeRange === "30m") return sensorRows.slice(-6);
+      if (timeRange === "8h") return sensorRows.slice(-96);
+      return sensorRows.slice(-288);
     }
   }, [sensorRows, timeRange]);
 
-  // Downsample data jika terlalu padat (maks 120 titik) agar render grafik super halus
+  // Downsample data jika terlalu padat (maks 150 titik) agar render grafik super halus dan cepat
   const chartRows = useMemo(() => {
-    if (filteredRows.length <= 120) return filteredRows;
-    const step = Math.ceil(filteredRows.length / 120);
+    if (filteredRows.length <= 150) return filteredRows;
+    const step = Math.ceil(filteredRows.length / 150);
     const sampled = [];
     for (let i = 0; i < filteredRows.length; i += step) {
       sampled.push(filteredRows[i]);
@@ -222,11 +225,25 @@ export default function Dashboard() {
   }, [filteredRows]);
 
   const timeRangeLabel =
-    timeRange === "1m" ? "1 Menit Terakhir" : timeRange === "5m" ? "5 Menit Terakhir" : "1 Jam Terakhir";
+    timeRange === "30m"
+      ? "30 Menit Terakhir"
+      : timeRange === "8h"
+      ? "8 Jam Terakhir"
+      : "1 Hari (24 Jam) Terakhir";
 
   const chartLabels = chartRows.map((r) => {
+    if (!r.timestamp) return "";
     const parts = r.timestamp.split(" ");
-    return parts[1] || r.timestamp;
+    if (timeRange === "1d" && parts.length >= 2) {
+      const [y, m, d] = parts[0].split("-");
+      const [hh, mm] = parts[1].split(":");
+      return `${d}/${m} ${hh}:${mm}`;
+    }
+    if (parts.length >= 2) {
+      const [hh, mm, ss] = parts[1].split(":");
+      return `${hh}:${mm}${timeRange === "30m" && ss ? `:${ss}` : ""}`;
+    }
+    return r.timestamp;
   });
   const chartTemps = chartRows.map((r) => Number(r.temperature));
   const chartHums = chartRows.map((r) => Number(r.humidity));
@@ -558,6 +575,10 @@ export default function Dashboard() {
           <span className="status-value">DHT22 (Temperature &amp; Humidity)</span>
         </div>
         <div className="status-row">
+          <span className="status-label">Interval Pengiriman</span>
+          <span className="status-value">Setiap 5 Menit</span>
+        </div>
+        <div className="status-row">
           <span className="status-label">Platform Architecture</span>
           <span className="status-value">ESP32 + Next.js + Firebase Cloud</span>
         </div>
@@ -578,11 +599,11 @@ export default function Dashboard() {
           <div>
             <div className="graph-title">Grafik Suhu &amp; Kelembapan Real-Time (Live Recording)</div>
             <div className="graph-desc">
-              Visualisasi rekaman sensor per detik — Rentang aktif: <strong>{timeRangeLabel}</strong> ({filteredRows.length} titik sampel).
+              Visualisasi rekaman sensor per 5 menit — Rentang aktif: <strong>{timeRangeLabel}</strong> ({filteredRows.length} titik sampel).
             </div>
           </div>
 
-          {/* RENTANG WAKTU SELECTOR: 1 Menit, 5 Menit, 1 Jam */}
+          {/* RENTANG WAKTU SELECTOR: 30 Menit, 8 Jam, 1 Hari */}
           <div
             style={{
               display: "inline-flex",
@@ -595,60 +616,60 @@ export default function Dashboard() {
           >
             <button
               type="button"
-              id="btn-range-1m"
-              onClick={() => setTimeRange("1m")}
+              id="btn-range-30m"
+              onClick={() => setTimeRange("30m")}
               style={{
                 border: "none",
                 padding: "8px 14px",
                 borderRadius: "8px",
                 fontSize: "13px",
-                fontWeight: timeRange === "1m" ? "700" : "500",
-                background: timeRange === "1m" ? "#2563eb" : "transparent",
-                color: timeRange === "1m" ? "white" : "#475569",
+                fontWeight: timeRange === "30m" ? "700" : "500",
+                background: timeRange === "30m" ? "#2563eb" : "transparent",
+                color: timeRange === "30m" ? "white" : "#475569",
                 cursor: "pointer",
                 transition: "all 0.2s ease",
-                boxShadow: timeRange === "1m" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
+                boxShadow: timeRange === "30m" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
               }}
             >
-              ⏱ 1 Menit
+              ⏱ 30 Menit
             </button>
             <button
               type="button"
-              id="btn-range-5m"
-              onClick={() => setTimeRange("5m")}
+              id="btn-range-8h"
+              onClick={() => setTimeRange("8h")}
               style={{
                 border: "none",
                 padding: "8px 14px",
                 borderRadius: "8px",
                 fontSize: "13px",
-                fontWeight: timeRange === "5m" ? "700" : "500",
-                background: timeRange === "5m" ? "#2563eb" : "transparent",
-                color: timeRange === "5m" ? "white" : "#475569",
+                fontWeight: timeRange === "8h" ? "700" : "500",
+                background: timeRange === "8h" ? "#2563eb" : "transparent",
+                color: timeRange === "8h" ? "white" : "#475569",
                 cursor: "pointer",
                 transition: "all 0.2s ease",
-                boxShadow: timeRange === "5m" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
+                boxShadow: timeRange === "8h" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
               }}
             >
-              ⏱ 5 Menit
+              ⏱ 8 Jam
             </button>
             <button
               type="button"
-              id="btn-range-1h"
-              onClick={() => setTimeRange("1h")}
+              id="btn-range-1d"
+              onClick={() => setTimeRange("1d")}
               style={{
                 border: "none",
                 padding: "8px 14px",
                 borderRadius: "8px",
                 fontSize: "13px",
-                fontWeight: timeRange === "1h" ? "700" : "500",
-                background: timeRange === "1h" ? "#2563eb" : "transparent",
-                color: timeRange === "1h" ? "white" : "#475569",
+                fontWeight: timeRange === "1d" ? "700" : "500",
+                background: timeRange === "1d" ? "#2563eb" : "transparent",
+                color: timeRange === "1d" ? "white" : "#475569",
                 cursor: "pointer",
                 transition: "all 0.2s ease",
-                boxShadow: timeRange === "1h" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
+                boxShadow: timeRange === "1d" ? "0 2px 6px rgba(37,99,235,0.25)" : "none",
               }}
             >
-              ⏱ 1 Jam
+              ⏱ 1 Hari
             </button>
           </div>
         </div>

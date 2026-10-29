@@ -87,7 +87,7 @@ export default function RekapPage() {
             const recordTime = new Date(y, m - 1, d, hh, mm, ss).getTime();
             const diffMinutes = Math.floor((Date.now() - recordTime) / (1000 * 60));
             setLastSeenMinutes(diffMinutes);
-            if (diffMinutes >= 0 && diffMinutes <= 15) {
+            if (diffMinutes >= 0 && diffMinutes <= 20) {
               setDeviceStatus("ONLINE");
             } else {
               setDeviceStatus("OFFLINE");

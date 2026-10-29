@@ -30,9 +30,9 @@ const char* serverURL = "https://sipet-five.vercel.app/api/sensor";
 
 WiFiServer server(80);
 
-// PENGIRIMAN DATA KE DATABASE SETIAP 1 DETIK (1.000 ms)
+// PENGIRIMAN DATA KE DATABASE SETIAP 5 MENIT (300.000 ms)
 unsigned long lastSendTime = 0;
-const unsigned long sendInterval = 1000UL;
+const unsigned long sendInterval = 300000UL;
 
 // RECONNECT WIFI
 unsigned long lastReconnectAttempt = 0;
