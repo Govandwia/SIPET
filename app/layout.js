@@ -2,8 +2,11 @@ import "./globals.css";
 import Link from "next/link";
 
 export const metadata = {
-  title: "SIPET - Incubator Monitoring (Next.js & Firebase)",
+  title: "Incubator Monitoring System",
   description: "Real-Time Environmental Monitoring System for Egg Incubator powered by ESP32, Next.js, and Firebase",
+  icons: {
+    icon: "/logo-ugm.png",
+  },
 };
 
 export default function RootLayout({ children }) {
@@ -70,7 +73,7 @@ export default function RootLayout({ children }) {
 
         <footer className="footer" style={{ textAlign: "center", lineHeight: "1.6" }}>
           <div>
-            <strong>SIPET - Incubator Monitoring</strong> • Tugas Akhir (TA) Septina Tri Rahayu ({'23/519797/SV/23180'})
+            <strong>Incubator Monitoring System</strong> • Tugas Akhir (TA) Septina Tri Rahayu ({'23/519797/SV/23180'})
           </div>
           <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "4px" }}>
             Teknologi Veteriner • Departemen Teknologi Hayati dan Veteriner • Sekolah Vokasi Universitas Gadjah Mada
